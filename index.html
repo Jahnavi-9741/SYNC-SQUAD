@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SYNC SQUAD - Team Fitness</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Teko:wght@300;500;700&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- TensorFlow.js and Pose Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="h-screen w-screen relative scan-overlay">
+    <!-- WEBCAM LAYER -->
+    <div id="canvas-container" class="absolute inset-0 flex items-center justify-center bg-black">
+        <video id="video" class="hidden" playsinline></video>
+        <canvas id="output" class="absolute top-0 left-0 w-full h-full object-cover opacity-90"></canvas>
+    </div>
+
+    <!-- UI LAYER: LOBBY -->
+    <div id="lobby-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/95 z-50 transition-opacity duration-500 backdrop-blur-md overflow-y-auto py-8">
+        <div class="text-center mb-6 shrink-0">
+            <h1 class="font-sport text-8xl md:text-9xl mb-0 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-rose-500 leading-none drop-shadow-lg">SYNC SQUAD</h1>
+            <p class="text-xl text-gray-400 font-light tracking-[0.4em] mt-2">TACTICAL FITNESS PROTOCOL</p>
+        </div>
+        
+        <div class="glass-panel p-8 rounded-2xl max-w-xl w-full text-center relative shrink-0 border-t-4 border-t-blue-500">
+            <!-- 1. Squad Size -->
+            <div class="flex items-center justify-between mb-4 bg-slate-900/50 p-4 rounded-xl border border-white/5">
+                <span class="text-2xl font-sport text-gray-300">SQUAD SIZE</span>
+                <div class="flex items-center gap-4">
+                    <button onclick="adjustTeam(-1)" class="w-12 h-12 rounded-lg bg-slate-800 hover:bg-rose-600 transition flex items-center justify-center text-2xl font-bold border border-white/10">-</button>
+                    <span id="team-size-display" class="text-5xl font-sport text-white w-12 text-center">2</span>
+                    <button onclick="adjustTeam(1)" class="w-12 h-12 rounded-lg bg-slate-800 hover:bg-blue-600 transition flex items-center justify-center text-2xl font-bold border border-white/10">+</button>
+                </div>
+            </div>
+
+            <!-- 2. Difficulty -->
+            <div class="mb-6">
+                <div class="text-xs text-blue-400 uppercase tracking-widest mb-2 text-left font-bold">Select Difficulty Protocol</div>
+                <div class="grid grid-cols-3 gap-3">
+                    <button onclick="setDifficulty('EASY')" id="diff-easy" class="diff-btn glass-panel py-3 font-sport text-2xl text-green-400 tracking-wide">RECRUIT</button>
+                    <button onclick="setDifficulty('MEDIUM')" id="diff-med" class="diff-btn selected glass-panel py-3 font-sport text-2xl text-yellow-400 tracking-wide">VETERAN</button>
+                    <button onclick="setDifficulty('HARD')" id="diff-hard" class="diff-btn glass-panel py-3 font-sport text-2xl text-rose-500 tracking-wide">ELITE</button>
+                </div>
+            </div>
+
+            <!-- 3. Player Names -->
+            <div class="mb-6">
+                <div class="text-xs text-blue-400 uppercase tracking-widest mb-2 text-left font-bold">Operative ID (Stand Left to Right)</div>
+                <div id="player-inputs-container" class="grid grid-cols-2 gap-3">
+                    <!-- Dynamic Inputs -->
+                </div>
+            </div>
+
+            <!-- 4. Dynamic Preview -->
+            <div class="text-left mb-8">
+                <div class="text-xs text-gray-500 uppercase tracking-widest mb-2 font-bold">Mission Parameters</div>
+                <div id="exercise-preview-container" class="space-y-2 bg-slate-900/50 p-4 rounded-xl border border-white/5 min-h-[140px]">
+                    <!-- JS Injected -->
+                </div>
+            </div>
+
+            <button onclick="startGame()" id="start-btn" class="w-full py-5 bg-gradient-to-r from-blue-600 to-rose-600 text-white font-bold font-sport text-3xl tracking-widest rounded-xl hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(59,130,246,0.4)] uppercase">Initiate Sync</button>
+            <p id="loading-msg" class="mt-4 text-xs text-blue-400 hidden animate-pulse font-mono">INITIALIZING NEURAL LINK...</p>
+        </div>
+    </div>
+
+    <!-- UI LAYER: HUD (In-Game) -->
+    <div id="game-hud" class="absolute inset-0 pointer-events-none hidden z-40">
+        <div class="absolute top-0 left-0 w-full p-4 md:p-8 flex justify-between items-start">
+            <!-- Level Info -->
+            <div class="glass-panel px-6 py-4 rounded-xl flex flex-col min-w-[200px]">
+                <span class="text-[10px] text-gray-400 tracking-[0.2em] uppercase font-bold">Current Protocol</span>
+                <div class="flex items-baseline gap-3 mt-1">
+                    <span class="text-6xl font-sport text-white leading-none" id="hud-level">1</span>
+                    <span id="hud-exercise" class="text-2xl font-sport text-rose-400 uppercase leading-none">Jumping Jacks</span>
+                </div>
+            </div>
+            
+            <!-- Timer -->
+            <div class="absolute top-4 md:top-8 left-1/2 transform -translate-x-1/2 text-center">
+                 <div class="glass-panel rounded-full w-28 h-28 flex flex-col items-center justify-center border-4 border-slate-800/50">
+                     <div class="text-[10px] text-gray-400 uppercase tracking-widest font-bold">TIME</div>
+                     <div id="hud-timer" class="text-6xl font-sport text-white leading-none mt-1">00</div>
+                 </div>
+            </div>
+
+            <!-- Rep Counter -->
+            <div class="glass-panel px-6 py-4 rounded-xl text-right min-w-[180px]">
+                <div class="text-[10px] text-gray-400 tracking-[0.2em] uppercase font-bold">Squad Target</div>
+                <div class="text-6xl font-sport text-white leading-none mt-1">
+                    <span id="hud-reps" class="text-blue-400">0</span><span class="text-gray-600 text-4xl mx-2">/</span><span id="hud-target">20</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="absolute bottom-12 left-8 right-8 h-3 bg-slate-800 rounded-full overflow-hidden border border-white/10">
+            <div id="progress-fill" class="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-rose-500 w-0 transition-all duration-300 shadow-[0_0_15px_rgba(59,130,246,0.8)]"></div>
+        </div>
+
+        <!-- Overlay -->
+        <div id="overlay-msg" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/95 hidden z-50 backdrop-blur-xl transition-all duration-500">
+            <h1 id="overlay-title" class="text-8xl font-sport text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400 mb-8 drop-shadow-lg">NEXT PHASE</h1>
+            <div class="flex flex-col md:flex-row items-center gap-10 bg-slate-900/50 p-8 rounded-2xl border border-white/10 max-w-5xl w-full mx-6 shadow-2xl">
+                <div class="flex-shrink-0 relative">
+                    <canvas id="demo-canvas" width="240" height="240"></canvas>
+                    <div class="absolute -bottom-3 left-1/2 transform -translate-x-1/2 bg-black/80 text-blue-400 text-[10px] px-3 py-1 rounded-full uppercase tracking-widest border border-blue-500/30 font-bold">Holo-Guide</div>
+                </div>
+                <div class="flex-1 text-center md:text-left space-y-6">
+                    <div class="flex flex-col gap-2">
+                         <div id="overlay-difficulty" class="self-center md:self-start inline-block px-3 py-1 text-white font-bold text-xs bg-yellow-500 shadow-lg tracking-widest rounded">MEDIUM INTENSITY</div>
+                         <p id="overlay-sub" class="text-4xl text-white font-sport tracking-wide">ALL PLAYERS READY</p>
+                    </div>
+                    <div class="h-px w-full bg-gradient-to-r from-blue-500 to-transparent"></div>
+                    <p id="overlay-instruction" class="text-gray-300 text-2xl font-light leading-relaxed">Start with feet together. Jump to spread legs and raise arms.</p>
+                </div>
+                <div class="flex-shrink-0 w-32 h-32 flex items-center justify-center rounded-full border-4 border-slate-800 relative bg-black/40">
+                     <div id="countdown" class="text-7xl font-sport text-white relative z-10">3</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UI LAYER: SUMMARY -->
+    <div id="summary-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 z-50 hidden overflow-y-auto py-10">
+        <div class="w-full max-w-6xl p-6">
+            <h1 class="font-sport text-7xl text-white mb-8 tracking-widest border-b-2 border-rose-500/50 pb-4 text-center">MISSION DEBRIEF</h1>
+            <div class="flex flex-col lg:flex-row gap-8">
+                <div class="w-full lg:w-1/3 glass-panel p-6 rounded-2xl h-fit">
+                     <h2 class="text-2xl font-sport text-blue-400 mb-6 border-b border-white/10 pb-2">Phase Timeline</h2>
+                     <div id="timeline-grid" class="space-y-4"></div>
+                </div>
+                <div class="w-full lg:w-2/3 flex flex-col gap-6">
+                     <div id="stats-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                     <div class="flex gap-4">
+                        <div class="glass-panel p-6 rounded-2xl flex-1 text-center border-t-4 border-green-500">
+                            <h3 class="text-xs text-gray-400 mb-2 uppercase tracking-widest font-bold">Total Squad Reps</h3>
+                            <div class="text-7xl font-sport text-white" id="total-score">0</div>
+                        </div>
+                        <div class="glass-panel p-6 rounded-2xl flex-1 text-center border-t-4 border-blue-500">
+                            <h3 class="text-xs text-gray-400 mb-2 uppercase tracking-widest font-bold">Sync Efficiency</h3>
+                            <div class="text-7xl font-sport text-white" id="final-sync">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center mt-10">
+                <button onclick="location.reload()" class="px-12 py-4 bg-white text-slate-900 hover:bg-rose-500 hover:text-white font-sport text-2xl rounded-xl transition-all shadow-xl uppercase font-bold tracking-wider">New Mission</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Files -->
+    <script src="js/config.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/pose-detection.js"></script>
+</body>
+</html>
